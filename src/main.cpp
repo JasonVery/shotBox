@@ -3,6 +3,9 @@
 void moveToState(int state);
 void moveMotor(int steps);
 void moveToHomeState(int steps);
+void enqueue(int state);
+int dequeue();
+bool isEmpty();
 
 // Stepper motor pins
 //*May need to be changed later after prototype
@@ -21,6 +24,21 @@ bool zeroPressed = false;
 bool onePressed = false;
 bool twoPressed = false;
 bool threePressed = false;
+
+// Used so we can serice more than 1 state before returning to home
+// Gunna use linked list just for more prac, may be overkill but will also
+// allow us to stremaline adding and subtracting states from queue+
+struct Node
+{
+    int state;
+    Node *next;
+};
+
+Node *head = NULL;
+Node *tail = NULL;
+
+// Will have to update this so we know how far we need to move back to home state
+int currentRotation = 0;
 
 // Keeps track if motor is active or not
 // ie when its in a button position it will be active
@@ -53,25 +71,43 @@ void loop()
         // Print statements just for debugging purposes
         printf("State 0 Has been Pressed\n");
         zeroPressed = true;
-        moveToState(0);
+        enqueue(0);
     }
     if (digitalRead(state1) == LOW && onePressed == false)
     {
         printf("State 1 Has been Pressed\n");
         onePressed = true;
-        moveToState(1);
+        enqueue(1);
     }
     if (digitalRead(state2) == LOW && twoPressed == false)
     {
         printf("State 2 Has been Pressed\n");
         twoPressed = true;
-        moveToState(2);
+        enqueue(2);
     }
     if (digitalRead(state3) == LOW && threePressed == false)
     {
         printf("State 3 Has been Pressed\n");
         threePressed = true;
-        moveToState(3);
+        enqueue(3);
+    }
+
+    // Looping through service queue to move motor
+    while (!isEmpty())
+    {
+        // Dequeue next state
+        int state = dequeue();
+        if (state != -1)
+        {
+            // Move motor to that state
+            moveToState(state);
+        }
+    }
+
+    // After we process all states in service queue we will move back to home state
+    if (isEmpty() && currentRotation == 0)
+    {
+        moveToHomeState(currentRotation);
     }
 }
 
@@ -83,33 +119,33 @@ void moveToState(int state)
     {
     case 0:
         Serial.println("Going to State 0");
-        moveMotor(100);
+        moveMotor(75);
         delay(5000);
-        moveToHomeState(100);
+        moveToHomeState(75);
         zeroPressed = false;
         break;
 
     case 1:
         Serial.println("Going to State 1");
-        moveMotor(200);
+        moveMotor(150);
         delay(5000);
-        moveToHomeState(200);
+        moveToHomeState(150);
         onePressed = false;
         break;
 
     case 2:
         Serial.println("Going to State 2");
-        moveMotor(300);
+        moveMotor(225);
         delay(5000);
-        moveToHomeState(300);
+        moveToHomeState(225);
         twoPressed = false;
         break;
 
     case 3:
         Serial.println("Going to State 3");
-        moveMotor(400);
+        moveMotor(300);
         delay(5000);
-        moveToHomeState(400);
+        moveToHomeState(300);
         threePressed = false;
         break;
 
@@ -119,28 +155,26 @@ void moveToState(int state)
     }
 }
 
-//This function moves motor counterclockwise from
-//home state to selected state through button press
+// This function moves motor counterclockwise from
+// home state to selected state through button press
 void moveMotor(int steps)
 {
-  //Step sequence is from gpt seems like easiest way to implement 
+    // Step sequence is from gpt seems like easiest way to implement
     int stepSequence[4][4] = {
-        {1, 0, 0, 1}, 
-        {1, 1, 0, 0}, 
-        {0, 1, 1, 0}, 
-        {0, 0, 1, 1}  
-    };
+        {1, 0, 0, 1},
+        {1, 1, 0, 0},
+        {0, 1, 1, 0},
+        {0, 0, 1, 1}};
 
-    
     for (int step = 0; step < steps; step++)
     {
         for (int i = 3; i >= 0; i--)
-        { 
+        {
             for (int pin = 0; pin < 4; pin++)
             {
                 digitalWrite(stepPins[pin], stepSequence[i][pin]);
             }
-            //Seems to be the sweet spot for motor speed
+            // Seems to be the sweet spot for motor speed
             delay(3);
         }
     }
@@ -152,26 +186,25 @@ void moveMotor(int steps)
     }
 }
 
-//This fucntion moves motor clockwise from selected state to home
+// This function moves motor clockwise from selected state to home
 void moveToHomeState(int steps)
 {
     int stepSequence[4][4] = {
-        {1, 0, 0, 1}, 
-        {1, 1, 0, 0}, 
-        {0, 1, 1, 0}, 
-        {0, 0, 1, 1}  
-    };
+        {1, 0, 0, 1},
+        {1, 1, 0, 0},
+        {0, 1, 1, 0},
+        {0, 0, 1, 1}};
 
     // Moves motor clockwise back to home state
     for (int step = 0; step < steps; step++)
     {
         for (int i = 0; i < 4; i++)
-        { 
+        {
             for (int pin = 0; pin < 4; pin++)
             {
                 digitalWrite(stepPins[pin], stepSequence[i][pin]);
             }
-            //Sweet spot
+            // Sweet spot
             delay(3);
         }
     }
@@ -179,8 +212,57 @@ void moveToHomeState(int steps)
     // Turn off all motor pins
     for (int pin = 0; pin < 4; pin++)
     {
-        digitalWrite(stepPins[pin], LOW); 
+        digitalWrite(stepPins[pin], LOW);
     }
 
     Serial.println("Returned to Home State");
+}
+
+// Pretty standard linked list implementation
+// To add new states to queue
+void enqueue(int state)
+{
+    Node *newNode = new Node;
+    newNode->state = state;
+    newNode->next = NULL;
+    if (tail == NULL)
+    {
+        head = newNode;
+        tail = newNode;
+    }
+    else
+    {
+        tail->next = newNode;
+        tail = newNode;
+    }
+}
+// Again pretty standard linked list implementation to dequeue
+// could possibly be void but unsure
+int dequeue()
+{
+    // Should never get here but just in case
+    if (head == NULL)
+    {
+        // Just incase we see this issue
+        printf("Queue is Empty\n");
+        return -1;
+    }
+
+    Node *temp = head;
+    int state = head->state;
+    head = head->next;
+
+    if (head == NULL)
+    {
+        tail = NULL;
+    }
+
+    delete temp;
+    return state;
+}
+
+// Returns true if queue is empty
+bool isEmpty()
+{
+    return head == NULL;
 }
