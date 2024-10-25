@@ -1,33 +1,34 @@
 #include <Arduino.h>
+#include <Stepper.h>
 
-void moveToState(int state);
-void moveMotor(int steps);
-void moveToHomeState(int steps);
 void enqueue(int state);
 int dequeue();
-bool isEmpty();
+void processServiceQueue();
 
-// Stepper motor pins
-//*May need to be changed later after prototype
-int stepPins[] = {14, 27, 26, 25};
+const int stepsPerRevolution = 2048;
 
-// Button pins, each button corresponds to a state
-//*May need to be changed later after prototype
-int state0 = 15;
-int state1 = 2;
-int state2 = 4;
-int state3 = 18;
+// Will need to adjust this time based on what pump I get
+const unsigned long pourTime = 4000;
 
-// Since the buttons will be held low when a glass is on top of button
-// We need to keep track of which button has been pressed so it only registers one press
+// Motor driver Pins
+#define IN1 14
+#define IN2 27
+#define IN3 26
+#define IN4 25
+
+// Buttons/States
+#define state0 15
+#define state1 2
+#define state2 4
+#define state3 18
+
+// Used so we can serice more than 1 state before returning to home
 bool zeroPressed = false;
 bool onePressed = false;
 bool twoPressed = false;
 bool threePressed = false;
 
-// Used so we can serice more than 1 state before returning to home
-// Gunna use linked list just for more prac, may be overkill but will also
-// allow us to stremaline adding and subtracting states from queue+
+// Using a linked list as a service queue
 struct Node
 {
     int state;
@@ -37,32 +38,27 @@ struct Node
 Node *head = NULL;
 Node *tail = NULL;
 
-// Will have to update this so we know how far we need to move back to home state
-int currentRotation = 0;
+// Intializing Stepper Motor
+Stepper stepper(stepsPerRevolution, IN1, IN2, IN3, IN4);
 
-// Keeps track if motor is active or not
-// ie when its in a button position it will be active
-// If in home state it will be inactive
-bool activeMotor = false;
+unsigned long previousMillis = 0;
+bool isProcessing = false;
+int currentState = -1;
+
 void setup()
 {
-    // Serial for Debugging
+    // Serial so we can debug
     Serial.begin(115200);
-    // Setting up out motor pins
-    for (int i = 0; i < 4; i++)
-    {
-        pinMode(stepPins[i], OUTPUT);
-        // Make sure pins are all working
-        Serial.println("Pin: " + String(stepPins[i]) + " good to go");
-    }
-    // Now setting up buttons using internal pullup resistor (heard about it online dont know what it does)
+    // Sets speed using library
+    stepper.setSpeed(9);
+
+    // Now setting up buttons using internal pullup resistor
     pinMode(state0, INPUT_PULLUP);
     pinMode(state1, INPUT_PULLUP);
     pinMode(state2, INPUT_PULLUP);
     pinMode(state3, INPUT_PULLUP);
 }
 
-// Main loop to control prog
 void loop()
 {
     // From my understanding == low means button is pressed
@@ -92,130 +88,7 @@ void loop()
         enqueue(3);
     }
 
-    // Looping through service queue to move motor
-    while (!isEmpty())
-    {
-        // Dequeue next state
-        int state = dequeue();
-        if (state != -1)
-        {
-            // Move motor to that state
-            moveToState(state);
-        }
-    }
-
-    // After we process all states in service queue we will move back to home state
-    if (isEmpty() && currentRotation == 0)
-    {
-        moveToHomeState(currentRotation);
-    }
-}
-
-// This function is called when the button is pressed
-// And calls the moveMotor Function to move to that state
-void moveToState(int state)
-{
-    switch (state)
-    {
-    case 0:
-        Serial.println("Going to State 0");
-        moveMotor(75);
-        delay(5000);
-        moveToHomeState(75);
-        zeroPressed = false;
-        break;
-
-    case 1:
-        Serial.println("Going to State 1");
-        moveMotor(150);
-        delay(5000);
-        moveToHomeState(150);
-        onePressed = false;
-        break;
-
-    case 2:
-        Serial.println("Going to State 2");
-        moveMotor(225);
-        delay(5000);
-        moveToHomeState(225);
-        twoPressed = false;
-        break;
-
-    case 3:
-        Serial.println("Going to State 3");
-        moveMotor(300);
-        delay(5000);
-        moveToHomeState(300);
-        threePressed = false;
-        break;
-
-    // Should never get here
-    default:
-        break;
-    }
-}
-
-// This function moves motor counterclockwise from
-// home state to selected state through button press
-void moveMotor(int steps)
-{
-    // Step sequence is from gpt seems like easiest way to implement
-    int stepSequence[4][4] = {
-        {1, 0, 0, 1},
-        {1, 1, 0, 0},
-        {0, 1, 1, 0},
-        {0, 0, 1, 1}};
-
-    for (int step = 0; step < steps; step++)
-    {
-        for (int i = 3; i >= 0; i--)
-        {
-            for (int pin = 0; pin < 4; pin++)
-            {
-                digitalWrite(stepPins[pin], stepSequence[i][pin]);
-            }
-            // Seems to be the sweet spot for motor speed
-            delay(3);
-        }
-    }
-
-    // Turn off all motor pins so we dont use power when not in use
-    for (int pin = 0; pin < 4; pin++)
-    {
-        digitalWrite(stepPins[pin], LOW);
-    }
-}
-
-// This function moves motor clockwise from selected state to home
-void moveToHomeState(int steps)
-{
-    int stepSequence[4][4] = {
-        {1, 0, 0, 1},
-        {1, 1, 0, 0},
-        {0, 1, 1, 0},
-        {0, 0, 1, 1}};
-
-    // Moves motor clockwise back to home state
-    for (int step = 0; step < steps; step++)
-    {
-        for (int i = 0; i < 4; i++)
-        {
-            for (int pin = 0; pin < 4; pin++)
-            {
-                digitalWrite(stepPins[pin], stepSequence[i][pin]);
-            }
-            // Sweet spot
-            delay(3);
-        }
-    }
-
-    // Turn off all motor pins
-    for (int pin = 0; pin < 4; pin++)
-    {
-        digitalWrite(stepPins[pin], LOW);
-    }
-
-    Serial.println("Returned to Home State");
+    processServiceQueue();
 }
 
 // Pretty standard linked list implementation
@@ -261,8 +134,39 @@ int dequeue()
     return state;
 }
 
-// Returns true if queue is empty
 bool isEmpty()
 {
     return head == NULL;
+}
+
+// Once queue is added to queue this will iterate through
+// the queue and process each state in order
+// Might add some logic to make if more efficient
+// Like if we are in state 3 and next is 0 but we also have state 2
+// Go from state 3 -> 2 -> 0 instead of 3 -> 0 -> 2
+void processServiceQueue()
+{
+    unsigned long currentMillis = millis();
+
+    // Check if currently processing a state
+    if (!isProcessing && !isEmpty())
+    {
+        // Start processing the next state in the queue
+        currentState = dequeue();
+        Serial.print("Processing state: ");
+        Serial.println(currentState);
+        stepper.step(200);
+        isProcessing = true;
+        previousMillis = currentMillis; // Start timing
+    }
+
+    // If a state is being processed, check if delay has passed
+    if (isProcessing && (currentMillis - previousMillis >= pourTime))
+    {
+        // Finish processing the state and reset
+        Serial.print("Completed state: ");
+        Serial.println(currentState);
+        isProcessing = false;
+        currentState = -1;
+    }
 }
