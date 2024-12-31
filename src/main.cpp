@@ -1,172 +1,221 @@
 #include <Arduino.h>
 #include <Stepper.h>
+#include <math.h>
+void addToServiceQueue(int drinkID);
+void sortDrinks(int drinkServiceQueue[], int drinkServiceQueueLength);
+void serviceRequests();
+void resetService();
+void disableStepper();
+void testMotor();
 
-void enqueue(int state);
-int dequeue();
-void processServiceQueue();
+// Steps of our current motor I believe is 2048
+const int STEPS = 2048;
 
-const int stepsPerRevolution = 2048;
+// Creating instance of our motor with pins its attached to
+Stepper stepper(STEPS, 14, 26, 27, 25);
+// Simple array of the pins so I can turn off and on when needed so it doesnt overheat
+const int stepperPins[4] = {14, 26, 27, 25};
 
-// Will need to adjust this time based on what pump I get
-const unsigned long pourTime = 4000;
+// Current pin setup so i dont forget
+//  In1 14
+//  In2 27
+//  In3 26
+//  In4 25
 
-// Motor driver Pins
-#define IN1 14
-#define IN2 27
-#define IN3 26
-#define IN4 25
+// Buttons/Glass locations pins they are connected to
+#define drinkZero 15
+#define drinkOne 2
+#define drinkTwo 0
+#define drinkThree 4
 
-// Buttons/States
-#define state0 15
-#define state1 2
-#define state2 4
-#define state3 18
+// Start Button
+#define startService 5
 
 // Used so we can serice more than 1 state before returning to home
 bool zeroPressed = false;
 bool onePressed = false;
 bool twoPressed = false;
 bool threePressed = false;
+bool startPressed = false;
 
-// Using a linked list as a service queue
-struct Node
-{
-    int state;
-    Node *next;
-};
-
-Node *head = NULL;
-Node *tail = NULL;
-
-// Intializing Stepper Motor
-Stepper stepper(stepsPerRevolution, IN1, IN2, IN3, IN4);
-
-unsigned long previousMillis = 0;
-bool isProcessing = false;
-int currentState = -1;
+// Array to hold each button that gets pressed
+int drinkServiceQueue[4];
+int drinkServiceQueueLength = 0;
 
 void setup()
 {
     // Serial so we can debug
     Serial.begin(115200);
-    // Sets speed using library
-    stepper.setSpeed(9);
 
-    // Now setting up buttons using internal pullup resistor
-    pinMode(state0, INPUT_PULLUP);
-    pinMode(state1, INPUT_PULLUP);
-    pinMode(state2, INPUT_PULLUP);
-    pinMode(state3, INPUT_PULLUP);
+    // Now setting up buttons using internal pullup resistor thanks google
+    pinMode(drinkZero, INPUT_PULLUP);
+    pinMode(drinkOne, INPUT_PULLUP);
+    pinMode(drinkTwo, INPUT_PULLUP);
+    pinMode(drinkThree, INPUT_PULLUP);
+    pinMode(startService, INPUT_PULLUP);
+
+    // Settin speed of motor will need some tuning
+    stepper.setSpeed(7);
+
+    Serial.println("Setup Complete");
 }
 
 void loop()
 {
     // From my understanding == low means button is pressed
-    if (digitalRead(state0) == LOW && zeroPressed == false)
+    if (digitalRead(drinkZero) == LOW && zeroPressed == false)
     {
         // Print statements just for debugging purposes
-        printf("State 0 Has been Pressed\n");
+        Serial.println("Drink 0 Has been Pressed");
         zeroPressed = true;
-        enqueue(0);
+        addToServiceQueue(256);
     }
-    if (digitalRead(state1) == LOW && onePressed == false)
+    if (digitalRead(drinkOne) == LOW && onePressed == false)
     {
-        printf("State 1 Has been Pressed\n");
+        Serial.println("Drink 1 Has been Pressed");
         onePressed = true;
-        enqueue(1);
+        addToServiceQueue(512);
     }
-    if (digitalRead(state2) == LOW && twoPressed == false)
+    if (digitalRead(drinkTwo) == LOW && twoPressed == false)
     {
-        printf("State 2 Has been Pressed\n");
+        Serial.println("Drink 2 Has been Pressed");
         twoPressed = true;
-        enqueue(2);
+        addToServiceQueue(768);
     }
-    if (digitalRead(state3) == LOW && threePressed == false)
+    if (digitalRead(drinkThree) == LOW && threePressed == false)
     {
-        printf("State 3 Has been Pressed\n");
+        Serial.println("Drink 3 Has been Pressed");
         threePressed = true;
-        enqueue(3);
+        addToServiceQueue(1024);
     }
-
-    processServiceQueue();
+    if (digitalRead(startService) == LOW && startPressed == false)
+    {
+        startPressed = true;
+        Serial.println("Start Button Pressed, will begin serivce");
+        serviceRequests();
+    }
 }
 
-// Pretty standard linked list implementation
-// To add new states to queue
-void enqueue(int state)
+// Adds drink postion to service queue once pressed, will be servied once main button is pressed
+// When we add to queue we are actually adding the amount of steps to move the motor
+void addToServiceQueue(int drinkID)
 {
-    Node *newNode = new Node;
-    newNode->state = state;
-    newNode->next = NULL;
-    if (tail == NULL)
-    {
-        head = newNode;
-        tail = newNode;
-    }
-    else
-    {
-        tail->next = newNode;
-        tail = newNode;
-    }
-}
-// Again pretty standard linked list implementation to dequeue
-// could possibly be void but unsure
-int dequeue()
-{
-    // Should never get here but just in case
-    if (head == NULL)
-    {
-        // Just incase we see this issue
-        printf("Queue is Empty\n");
-        return -1;
-    }
-
-    Node *temp = head;
-    int state = head->state;
-    head = head->next;
-
-    if (head == NULL)
-    {
-        tail = NULL;
-    }
-
-    delete temp;
-    return state;
+    drinkServiceQueue[drinkServiceQueueLength] = drinkID;
+    drinkServiceQueueLength++;
+    Serial.print("Drink ");
+    Serial.print(drinkID);
+    Serial.println(" Has been added to queue");
 }
 
-bool isEmpty()
+// Simple Bubble sort function, We want to have the motor service the queue from Highest to lowest drink pos
+void sortDrinks(int drinkServiceQueue[], int drinkServiceQueueLength)
 {
-    return head == NULL;
+    for (int i = 0; i < drinkServiceQueueLength - 1; i++)
+    {
+        for (int j = 0; j < drinkServiceQueueLength - i - 1; j++)
+        {
+            if (drinkServiceQueue[j] < drinkServiceQueue[j + 1])
+            {
+                int temp = drinkServiceQueue[j];
+                drinkServiceQueue[j] = drinkServiceQueue[j + 1];
+                drinkServiceQueue[j + 1] = temp;
+            }
+        }
+    }
+    Serial.println("Drinks have been sorted highest to lowest");
+    for (int i = 0; i < drinkServiceQueueLength; i++)
+    {
+        Serial.print(drinkServiceQueue[i]);
+        Serial.print(" ");
+    }
 }
 
-// Once queue is added to queue this will iterate through
-// the queue and process each state in order
-// Might add some logic to make if more efficient
-// Like if we are in state 3 and next is 0 but we also have state 2
-// Go from state 3 -> 2 -> 0 instead of 3 -> 0 -> 2
-void processServiceQueue()
+// Main function to move the motor to fill glasses
+void serviceRequests()
 {
-    unsigned long currentMillis = millis();
-
-    // Check if currently processing a state
-    if (!isProcessing && !isEmpty())
+    if (drinkServiceQueueLength == 0)
     {
-        // Start processing the next state in the queue
-        currentState = dequeue();
-        Serial.print("Processing state: ");
-        Serial.println(currentState);
-        stepper.step(200);
-        isProcessing = true;
-        previousMillis = currentMillis; // Start timing
+        Serial.println("No drinks to pour");
+        return;
     }
 
-    // If a state is being processed, check if delay has passed
-    if (isProcessing && (currentMillis - previousMillis >= pourTime))
+    // First we are sorting to the highest to lowest drink
+    sortDrinks(drinkServiceQueue, drinkServiceQueueLength);
+    // Keeps track of current position of motor
+    int currentPos = 0;
+    int totalSteps = 0;
+
+    // Array with our buttons, we are changing the logic slightley so drinks will only get
+    // Serviced if their position button remains pressed
+    int drinkButtons[4] = {drinkZero, drinkOne, drinkTwo, drinkThree};
+    // Now we are going to move the motor to each drink in the queue
+    for (int i = 0; i < drinkServiceQueueLength; i++)
     {
-        // Finish processing the state and reset
-        Serial.print("Completed state: ");
-        Serial.println(currentState);
-        isProcessing = false;
-        currentState = -1;
+        int nextDrink = drinkServiceQueue[i];
+        // This will calculate the button index- basically just maps the steps to the physical button
+        int buttonID = (nextDrink / 256) - 1;
+
+        // If the button does not remain pressed it will jsut skip
+        if (digitalRead(drinkButtons[buttonID]) == HIGH)
+        {
+            continue;
+        }
+
+        // First drink will be the furthest away and we want positive steps
+        if (i == 0)
+        {
+            // Current position will be 0 at this point so just add
+            totalSteps = nextDrink;
+            stepper.step(-totalSteps);
+        }
+        else
+        {
+            // All other drinks will need negative steps
+            totalSteps = nextDrink - currentPos;
+            stepper.step(abs(totalSteps));
+        }
+        // Updating our current position
+        currentPos = nextDrink;
+        // Delaying at each position this will have to be updated once pump is added
+        delay(4000);
     }
+
+    // Queue should be fully serviced now
+    // Returning home
+    stepper.step(currentPos);
+    currentPos = 0;
+    drinkServiceQueueLength = 0;
+    Serial.println("Drinks have been poured");
+    disableStepper();
+    resetService();
+}
+
+// This function just resets the buttons so we can service them again
+void resetService()
+{
+    zeroPressed = false;
+    onePressed = false;
+    twoPressed = false;
+    threePressed = false;
+    startPressed = false;
+}
+
+// Just simply turns off motor when in home position so we dont overheat
+void disableStepper()
+{
+    for (int i = 0; i < 4; i++)
+    {
+        digitalWrite(stepperPins[i], LOW);
+    }
+    Serial.println("Stepper Disabled");
+}
+
+void testMotor()
+{
+    stepper.step(200); // Move forward
+    delay(2000);
+
+    Serial.println("Moving backward 200 steps");
+    stepper.step(-200); // Move backward
+    delay(2000);
 }
