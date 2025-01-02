@@ -7,6 +7,7 @@ void serviceRequests();
 void resetService();
 void disableStepper();
 void testMotor();
+void testPump();
 
 // Steps of our current motor I believe is 2048
 const int STEPS = 2048;
@@ -30,6 +31,10 @@ const int stepperPins[4] = {14, 26, 27, 25};
 
 // Start Button
 #define startService 5
+
+// pump pins
+#define pump1 21
+#define pump2 22
 
 // Used so we can serice more than 1 state before returning to home
 bool zeroPressed = false;
@@ -56,6 +61,13 @@ void setup()
 
     // Settin speed of motor will need some tuning
     stepper.setSpeed(7);
+
+    // Setting up pump pins
+    pinMode(pump1, OUTPUT);
+    pinMode(pump2, OUTPUT);
+
+    // Just making sure queue is empty
+    resetService();
 
     Serial.println("Setup Complete");
 }
@@ -177,7 +189,8 @@ void serviceRequests()
         // Updating our current position
         currentPos = nextDrink;
         // Delaying at each position this will have to be updated once pump is added
-        delay(4000);
+        delay(2000);
+        testPump();
     }
 
     // Queue should be fully serviced now
@@ -198,6 +211,12 @@ void resetService()
     twoPressed = false;
     threePressed = false;
     startPressed = false;
+
+    drinkServiceQueueLength = 0;
+    for (int i = 0; i < 4; i++)
+    {
+        drinkServiceQueue[i] = 0;
+    }
 }
 
 // Just simply turns off motor when in home position so we dont overheat
@@ -214,8 +233,17 @@ void testMotor()
 {
     stepper.step(200); // Move forward
     delay(2000);
-
     Serial.println("Moving backward 200 steps");
     stepper.step(-200); // Move backward
+    delay(2000);
+}
+
+void testPump()
+{
+    digitalWrite(pump1, HIGH);
+    digitalWrite(pump2, HIGH);
+    delay(3000);
+    digitalWrite(pump1, LOW);
+    digitalWrite(pump2, LOW);
     delay(2000);
 }
