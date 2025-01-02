@@ -7,10 +7,13 @@ void serviceRequests();
 void resetService();
 void disableStepper();
 void testMotor();
-void testPump();
+void activatePump();
 
 // Steps of our current motor I believe is 2048
 const int STEPS = 2048;
+
+//This is the amount of steps from the home position to the drink position
+const int stepsToDrink[4] = {240, 430, 630, 830};
 
 // Creating instance of our motor with pins its attached to
 Stepper stepper(STEPS, 14, 26, 27, 25);
@@ -47,6 +50,9 @@ bool startPressed = false;
 int drinkServiceQueue[4];
 int drinkServiceQueueLength = 0;
 
+// Keeps track of current position of motor
+int currentPos = 0;
+
 void setup()
 {
     // Serial so we can debug
@@ -59,12 +65,22 @@ void setup()
     pinMode(drinkThree, INPUT_PULLUP);
     pinMode(startService, INPUT_PULLUP);
 
-    // Settin speed of motor will need some tuning
-    stepper.setSpeed(7);
-
     // Setting up pump pins
     pinMode(pump1, OUTPUT);
     pinMode(pump2, OUTPUT);
+
+    // Settin speed of motor will need some tuning
+    stepper.setSpeed(9);
+
+    // Was having some issues, so this delay and move just makes sure
+    // the motor is in the correct position and everyhting is ready to go
+    delay(10000);
+    stepper.step(50);
+    delay(2000);
+    stepper.step(-50);
+
+    // Turning off motor so we dont overheat
+    disableStepper();
 
     // Just making sure queue is empty
     resetService();
@@ -80,25 +96,25 @@ void loop()
         // Print statements just for debugging purposes
         Serial.println("Drink 0 Has been Pressed");
         zeroPressed = true;
-        addToServiceQueue(256);
+        addToServiceQueue(0);
     }
     if (digitalRead(drinkOne) == LOW && onePressed == false)
     {
         Serial.println("Drink 1 Has been Pressed");
         onePressed = true;
-        addToServiceQueue(512);
+        addToServiceQueue(1);
     }
     if (digitalRead(drinkTwo) == LOW && twoPressed == false)
     {
         Serial.println("Drink 2 Has been Pressed");
         twoPressed = true;
-        addToServiceQueue(768);
+        addToServiceQueue(2);
     }
     if (digitalRead(drinkThree) == LOW && threePressed == false)
     {
         Serial.println("Drink 3 Has been Pressed");
         threePressed = true;
-        addToServiceQueue(1024);
+        addToServiceQueue(3);
     }
     if (digitalRead(startService) == LOW && startPressed == false)
     {
@@ -112,7 +128,8 @@ void loop()
 // When we add to queue we are actually adding the amount of steps to move the motor
 void addToServiceQueue(int drinkID)
 {
-    drinkServiceQueue[drinkServiceQueueLength] = drinkID;
+    //This maps the index of the drink postion to the amount of steps to move the motor
+    drinkServiceQueue[drinkServiceQueueLength] = stepsToDrink[drinkID];
     drinkServiceQueueLength++;
     Serial.print("Drink ");
     Serial.print(drinkID);
@@ -134,6 +151,8 @@ void sortDrinks(int drinkServiceQueue[], int drinkServiceQueueLength)
             }
         }
     }
+
+    //Will remove this later
     Serial.println("Drinks have been sorted highest to lowest");
     for (int i = 0; i < drinkServiceQueueLength; i++)
     {
@@ -154,7 +173,6 @@ void serviceRequests()
     // First we are sorting to the highest to lowest drink
     sortDrinks(drinkServiceQueue, drinkServiceQueueLength);
     // Keeps track of current position of motor
-    int currentPos = 0;
     int totalSteps = 0;
 
     // Array with our buttons, we are changing the logic slightley so drinks will only get
@@ -165,7 +183,27 @@ void serviceRequests()
     {
         int nextDrink = drinkServiceQueue[i];
         // This will calculate the button index- basically just maps the steps to the physical button
-        int buttonID = (nextDrink / 256) - 1;
+
+        //This is horrible logic and could be done better but works for now
+        int buttonID;
+        if (nextDrink == 240)
+        {
+            buttonID = 0;
+        }
+        else if (nextDrink == 430)
+        {
+            buttonID = 1;
+        }
+        else if (nextDrink == 630)
+        {
+            buttonID = 2;
+        }
+        else if (nextDrink == 830)
+        {
+            buttonID = 3;
+        }
+    
+        // int buttonID = (nextDrink / 256) - 1;
 
         // If the button does not remain pressed it will jsut skip
         if (digitalRead(drinkButtons[buttonID]) == HIGH)
@@ -189,14 +227,13 @@ void serviceRequests()
         // Updating our current position
         currentPos = nextDrink;
         // Delaying at each position this will have to be updated once pump is added
-        delay(2000);
-        testPump();
+        delay(1000);
+        activatePump();
     }
 
     // Queue should be fully serviced now
     // Returning home
     stepper.step(currentPos);
-    currentPos = 0;
     drinkServiceQueueLength = 0;
     Serial.println("Drinks have been poured");
     disableStepper();
@@ -217,6 +254,8 @@ void resetService()
     {
         drinkServiceQueue[i] = 0;
     }
+
+    currentPos = 0;
 }
 
 // Just simply turns off motor when in home position so we dont overheat
@@ -231,19 +270,19 @@ void disableStepper()
 
 void testMotor()
 {
-    stepper.step(200); // Move forward
+    stepper.step(200);
     delay(2000);
-    Serial.println("Moving backward 200 steps");
-    stepper.step(-200); // Move backward
+    Serial.println("Moving backward 200");
+    stepper.step(-200);
     delay(2000);
 }
 
-void testPump()
+void activatePump()
 {
     digitalWrite(pump1, HIGH);
     digitalWrite(pump2, HIGH);
     delay(3000);
     digitalWrite(pump1, LOW);
     digitalWrite(pump2, LOW);
-    delay(2000);
+    delay(1000);
 }
